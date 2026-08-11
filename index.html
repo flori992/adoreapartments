@@ -469,7 +469,23 @@ function reservationModal(id=''){ if(!requirePermission(id?'reservations_edit':'
 <div class="field"><label>Phone Number</label><input id="rPhone" class="input" value="${esc(r.phone)}"></div><div class="field full"><label>Internal Notes</label><textarea id="rNotes" class="textarea" rows="3">${esc(r.notes)}</textarea></div></div>
 <div class="modalfoot">${id?`<button class="btn secondary" onclick="deleteReservation('${id}')">Delete</button>`:''}<button class="btn" onclick="saveReservation('${id}')">Save Reservation</button></div>`;modal.classList.add('show')}
 function saveReservation(id){let r={id:id||nextReservationId(),guestName:rGuest.value.trim(),propertyId:rProp.value,platform:rPlatform.value,checkin:rIn.value,checkout:rOut.value,totalPrice:Number(rPrice.value)||0,paymentStatus:rPay.value,paymentMethod:rPaymentMethod.value,phone:rPhone.value.trim(),notes:rNotes.value.trim()};if(!r.guestName||!r.checkin||!r.checkout){alert('Please add guest name and dates.');return}if(r.checkout<=r.checkin){alert('Check-out must be after check-in.');return}let i=state.reservations.findIndex(x=>x.id===r.id);i>=0?state.reservations[i]=r:state.reservations.push(r);save();closeModal();render()}
-function deleteReservation(id){ if(!requirePermission('reservations_delete')) return;if(confirm('Delete this reservation?')){state.reservations=state.reservations.filter(r=>r.id!==id);save();closeModal();render()}}
+async function deleteReservation(id){
+  if(!requirePermission('reservations_delete')) return;
+  if(!confirm('Delete this reservation?')) return;
+
+  if(CLOUD_ENABLED && currentUser){
+    const {error}=await supabaseClient.from('reservations').delete().eq('id',id);
+    if(error){
+      alert('Could not delete reservation: '+error.message);
+      return;
+    }
+  }
+
+  state.reservations=state.reservations.filter(r=>r.id!==id);
+  localStorage.setItem(KEY,JSON.stringify(state));
+  closeModal();
+  render();
+}
 function expenseModal(id=''){ if(!requirePermission(id?'expenses_edit':'expenses_add')) return;let e=state.expenses.find(x=>x.id===id)||{id:uid('EXP'),date:iso(today),category:'Rent',description:'',amount:'',propertyId:'',paidBy:'',paymentMethod:'Bank Transfer',listing:'Toni',receipt:''};modalTitle.textContent=id?'Edit Expense':'Add Expense';modalBody.innerHTML=`<div class="formgrid">
 <div class="field"><label>Expense ID</label><input class="input" value="${esc(e.id)}" disabled></div><div class="field"><label>Date</label><input id="eDate" type="date" class="input" value="${e.date}"></div>
 <div class="field"><label>Category</label><select id="eCat" class="select">${cats().map(x=>`<option ${x===e.category?'selected':''}>${esc(x)}</option>`).join('')}</select></div>
@@ -482,10 +498,46 @@ function expenseModal(id=''){ if(!requirePermission(id?'expenses_edit':'expenses
 <div class="field full"><label>Receipt / Image attachment</label><input id="eReceipt" type="file" class="input" accept="image/*,.pdf"></div></div>
 <div class="modalfoot">${id?`<button class="btn secondary" onclick="deleteExpense('${id}')">Delete</button>`:''}<button class="btn" onclick="saveExpense('${id}')">Save Expense</button></div>`;modal.classList.add('show')}
 function saveExpense(id){let e={id:id||uid('EXP'),date:eDate.value,category:eCat.value,description:eDesc.value.trim(),amount:Number(eAmt.value)||0,propertyId:eProp.value,paidBy:ePaid.value.trim(),paymentMethod:eMethod.value,listing:eListing.value,receipt:eReceipt.files[0]?.name||state.expenses.find(x=>x.id===id)?.receipt||''};let i=state.expenses.findIndex(x=>x.id===e.id);i>=0?state.expenses[i]=e:state.expenses.push(e);save();closeModal();render()}
-function deleteExpense(id){ if(!requirePermission('expenses_delete')) return;if(confirm('Delete this expense?')){state.expenses=state.expenses.filter(e=>e.id!==id);save();closeModal();render()}}
+async function deleteExpense(id){
+  if(!requirePermission('expenses_delete')) return;
+  if(!confirm('Delete this expense?')) return;
+
+  if(CLOUD_ENABLED && currentUser){
+    const {error}=await supabaseClient.from('expenses').delete().eq('id',id);
+    if(error){
+      alert('Could not delete expense: '+error.message);
+      return;
+    }
+  }
+
+  state.expenses=state.expenses.filter(e=>e.id!==id);
+  localStorage.setItem(KEY,JSON.stringify(state));
+  closeModal();
+  render();
+}
 function propertyModal(id=''){ if(!requirePermission(id?'properties_edit':'properties_add')) return;let p=state.properties.find(x=>x.id===id)||{id:uid('P'),name:'',address:'',active:true};modalTitle.textContent=id?'Edit Property':'Add Property';modalBody.innerHTML=`<div class="formgrid"><div class="field"><label>Property ID</label><input class="input" value="${esc(p.id)}" disabled></div><div class="field"><label>Property Name</label><input id="pName" class="input" value="${esc(p.name)}"></div><div class="field full"><label>Address / Notes</label><textarea id="pAddress" class="textarea" rows="3">${esc(p.address)}</textarea></div><div class="field"><label>Status</label><select id="pActive" class="select"><option value="1" ${p.active?'selected':''}>Active</option><option value="0" ${!p.active?'selected':''}>Inactive</option></select></div></div><div class="modalfoot">${id?`<button class="btn secondary" onclick="deleteProperty('${id}')">Delete</button>`:''}<button class="btn" onclick="saveProperty('${id}')">Save Property</button></div>`;modal.classList.add('show')}
 function saveProperty(id){let p={id:id||uid('P'),name:pName.value.trim(),address:pAddress.value.trim(),active:pActive.value==='1'};if(!p.name){alert('Add a property name.');return}let i=state.properties.findIndex(x=>x.id===p.id);i>=0?state.properties[i]=p:state.properties.push(p);save();closeModal();render()}
-function deleteProperty(id){ if(!requirePermission('properties_delete')) return;if(state.reservations.some(r=>r.propertyId===id)){alert('This property has reservations. Reassign or remove them first.');return}if(confirm('Delete this property?')){state.properties=state.properties.filter(p=>p.id!==id);save();closeModal();render()}}
+async function deleteProperty(id){
+  if(!requirePermission('properties_delete')) return;
+  if(state.reservations.some(r=>r.propertyId===id)){
+    alert('This property has reservations. Reassign or remove them first.');
+    return;
+  }
+  if(!confirm('Delete this property?')) return;
+
+  if(CLOUD_ENABLED && currentUser){
+    const {error}=await supabaseClient.from('properties').delete().eq('id',id);
+    if(error){
+      alert('Could not delete property: '+error.message);
+      return;
+    }
+  }
+
+  state.properties=state.properties.filter(p=>p.id!==id);
+  localStorage.setItem(KEY,JSON.stringify(state));
+  closeModal();
+  render();
+}
 function closeModal(){if(document.activeElement&&typeof document.activeElement.blur==='function')document.activeElement.blur();modal.classList.remove('show');setTimeout(()=>window.scrollTo(0,0),0)}
 function exportData(){let blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='stayflow-data.json';a.click();URL.revokeObjectURL(a.href)}
 (async function boot(){
