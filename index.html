@@ -89,7 +89,6 @@ let state=JSON.parse(localStorage.getItem(KEY)||'null')||{
 };
 function save(){
   localStorage.setItem(KEY,JSON.stringify(state));
-  if(CLOUD_ENABLED && currentUser) clearTimeout(window._cloudSaveTimer), window._cloudSaveTimer=setTimeout(cloudSyncAll,250);
 }
 function nextReservationId(){
   const used=new Set(state.reservations.map(r=>String(r.id)));
@@ -187,7 +186,7 @@ function addButtons(){return `<button class="btn" onclick="reservationModal()">+
 function dashboard(){
  const ym=iso(today).slice(0,7), rs=state.reservations.filter(r=>r.checkin.startsWith(ym)), es=state.expenses.filter(e=>e.date.startsWith(ym));
  const rev=rs.reduce((a,r)=>a+Number(r.totalPrice||0),0), ex=es.reduce((a,e)=>a+Number(e.amount||0),0), occ=currentReservations();
- shell('Dashboard',CLOUD_ENABLED&&currentUser?'Cloud connected · shared data':'Your rental business at a glance',addButtons());
+ shell('Dashboard',CLOUD_ENABLED&&currentUser?'Cloud connected · reservations save directly to Supabase':'Your rental business at a glance',addButtons());
  view.innerHTML+=`<div class="grid stats">
  ${stat('Reservations',rs.length,'this month')}${stat('Revenue',money(rev),'this month')}${stat('Expenses',money(ex),'this month')}${stat('Profit',money(rev-ex),'revenue − expenses')}
  </div><div class="grid two">
@@ -468,7 +467,58 @@ function reservationModal(id=''){ if(!requirePermission(id?'reservations_edit':'
 <div class="field"><label>Payment Method</label><select id="rPaymentMethod" class="select"><option ${((r.paymentMethod||'Card')==='Cash')?'selected':''}>Cash</option><option ${((r.paymentMethod||'Card')==='Card')?'selected':''}>Card</option></select></div>
 <div class="field"><label>Phone Number</label><input id="rPhone" class="input" value="${esc(r.phone)}"></div><div class="field full"><label>Internal Notes</label><textarea id="rNotes" class="textarea" rows="3">${esc(r.notes)}</textarea></div></div>
 <div class="modalfoot">${id?`<button class="btn secondary" onclick="deleteReservation('${id}')">Delete</button>`:''}<button class="btn" onclick="saveReservation('${id}')">Save Reservation</button></div>`;modal.classList.add('show')}
-function saveReservation(id){let r={id:id||nextReservationId(),guestName:rGuest.value.trim(),propertyId:rProp.value,platform:rPlatform.value,checkin:rIn.value,checkout:rOut.value,totalPrice:Number(rPrice.value)||0,paymentStatus:rPay.value,paymentMethod:rPaymentMethod.value,phone:rPhone.value.trim(),notes:rNotes.value.trim()};if(!r.guestName||!r.checkin||!r.checkout){alert('Please add guest name and dates.');return}if(r.checkout<=r.checkin){alert('Check-out must be after check-in.');return}let i=state.reservations.findIndex(x=>x.id===r.id);i>=0?state.reservations[i]=r:state.reservations.push(r);save();closeModal();render()}
+async function saveReservation(id){
+  const r={
+    id:id||nextReservationId(),
+    guestName:rGuest.value.trim(),
+    propertyId:rProp.value,
+    platform:rPlatform.value,
+    checkin:rIn.value,
+    checkout:rOut.value,
+    totalPrice:Number(rPrice.value)||0,
+    paymentStatus:rPay.value,
+    paymentMethod:rPaymentMethod.value,
+    phone:rPhone.value.trim(),
+    notes:rNotes.value.trim()
+  };
+  if(!r.guestName||!r.checkin||!r.checkout){alert('Please add guest name and dates.');return}
+  if(r.checkout<=r.checkin){alert('Check-out must be after check-in.');return}
+
+  if(CLOUD_ENABLED && currentUser){
+    const row={
+      id:r.id,
+      guest_name:r.guestName,
+      property_id:r.propertyId,
+      platform:r.platform,
+      check_in:r.checkin,
+      check_out:r.checkout,
+      total_price:r.totalPrice,
+      payment_status:r.paymentStatus,
+      payment_method:r.paymentMethod||'Card',
+      phone:r.phone,
+      notes:r.notes,
+      updated_by:currentUser.id,
+      updated_at:new Date().toISOString()
+    };
+    let result;
+    if(id){
+      result=await supabaseClient.from('reservations').update(row).eq('id',id).select().single();
+    }else{
+      row.created_by=currentUser.id;
+      result=await supabaseClient.from('reservations').insert(row).select().single();
+    }
+    if(result.error){
+      alert('Could not save reservation to the cloud: '+result.error.message);
+      return;
+    }
+  }
+
+  const i=state.reservations.findIndex(x=>x.id===r.id);
+  i>=0?state.reservations[i]=r:state.reservations.push(r);
+  save();
+  closeModal();
+  render();
+}
 async function deleteReservation(id){
   if(!requirePermission('reservations_delete')) return;
   if(!confirm('Delete this reservation?')) return;
@@ -497,7 +547,42 @@ function expenseModal(id=''){ if(!requirePermission(id?'expenses_edit':'expenses
 <div class="field"><label>Listing</label><select id="eListing" class="select">${['Toni','Likja','Flori'].map(x=>`<option ${x===e.listing?'selected':''}>${x}</option>`).join('')}</select></div>
 <div class="field full"><label>Receipt / Image attachment</label><input id="eReceipt" type="file" class="input" accept="image/*,.pdf"></div></div>
 <div class="modalfoot">${id?`<button class="btn secondary" onclick="deleteExpense('${id}')">Delete</button>`:''}<button class="btn" onclick="saveExpense('${id}')">Save Expense</button></div>`;modal.classList.add('show')}
-function saveExpense(id){let e={id:id||uid('EXP'),date:eDate.value,category:eCat.value,description:eDesc.value.trim(),amount:Number(eAmt.value)||0,propertyId:eProp.value,paidBy:ePaid.value.trim(),paymentMethod:eMethod.value,listing:eListing.value,receipt:eReceipt.files[0]?.name||state.expenses.find(x=>x.id===id)?.receipt||''};let i=state.expenses.findIndex(x=>x.id===e.id);i>=0?state.expenses[i]=e:state.expenses.push(e);save();closeModal();render()}
+async function saveExpense(id){
+  const e={
+    id:id||uid('EXP'),
+    date:eDate.value,
+    category:eCat.value,
+    description:eDesc.value.trim(),
+    amount:Number(eAmt.value)||0,
+    propertyId:eProp.value,
+    paidBy:ePaid.value.trim(),
+    paymentMethod:eMethod.value,
+    listing:eListing.value,
+    receipt:eReceipt.files[0]?.name||state.expenses.find(x=>x.id===id)?.receipt||''
+  };
+
+  if(CLOUD_ENABLED && currentUser){
+    const row={
+      id:e.id,date:e.date,category:e.category,description:e.description,amount:e.amount,
+      property_id:e.propertyId||null,paid_by:e.paidBy,payment_method:e.paymentMethod,
+      listing:e.listing,receipt_path:e.receipt||null,updated_by:currentUser.id,updated_at:new Date().toISOString()
+    };
+    let result;
+    if(id){
+      result=await supabaseClient.from('expenses').update(row).eq('id',id).select().single();
+    }else{
+      row.created_by=currentUser.id;
+      result=await supabaseClient.from('expenses').insert(row).select().single();
+    }
+    if(result.error){alert('Could not save expense to the cloud: '+result.error.message);return}
+  }
+
+  const i=state.expenses.findIndex(x=>x.id===e.id);
+  i>=0?state.expenses[i]=e:state.expenses.push(e);
+  save();
+  closeModal();
+  render();
+}
 async function deleteExpense(id){
   if(!requirePermission('expenses_delete')) return;
   if(!confirm('Delete this expense?')) return;
@@ -516,7 +601,40 @@ async function deleteExpense(id){
   render();
 }
 function propertyModal(id=''){ if(!requirePermission(id?'properties_edit':'properties_add')) return;let p=state.properties.find(x=>x.id===id)||{id:uid('P'),name:'',address:'',active:true};modalTitle.textContent=id?'Edit Property':'Add Property';modalBody.innerHTML=`<div class="formgrid"><div class="field"><label>Property ID</label><input class="input" value="${esc(p.id)}" disabled></div><div class="field"><label>Property Name</label><input id="pName" class="input" value="${esc(p.name)}"></div><div class="field full"><label>Address / Notes</label><textarea id="pAddress" class="textarea" rows="3">${esc(p.address)}</textarea></div><div class="field"><label>Status</label><select id="pActive" class="select"><option value="1" ${p.active?'selected':''}>Active</option><option value="0" ${!p.active?'selected':''}>Inactive</option></select></div></div><div class="modalfoot">${id?`<button class="btn secondary" onclick="deleteProperty('${id}')">Delete</button>`:''}<button class="btn" onclick="saveProperty('${id}')">Save Property</button></div>`;modal.classList.add('show')}
-function saveProperty(id){let p={id:id||uid('P'),name:pName.value.trim(),address:pAddress.value.trim(),active:pActive.value==='1'};if(!p.name){alert('Add a property name.');return}let i=state.properties.findIndex(x=>x.id===p.id);i>=0?state.properties[i]=p:state.properties.push(p);save();closeModal();render()}
+async function saveProperty(id){
+  const existing=state.properties.find(x=>x.id===id);
+  const p={
+    id:id||uid('P'),
+    name:pName.value.trim(),
+    address:pAddress.value.trim(),
+    active:pActive.value==='1',
+    bookingIcalUrl:existing?.bookingIcalUrl||'',
+    exportToken:existing?.exportToken||''
+  };
+  if(!p.name){alert('Add a property name.');return}
+
+  if(CLOUD_ENABLED && currentUser){
+    const row={id:p.id,name:p.name,address:p.address,active:p.active,updated_by:currentUser.id,updated_at:new Date().toISOString()};
+    let result;
+    if(id){
+      result=await supabaseClient.from('properties').update(row).eq('id',id).select().single();
+    }else{
+      row.created_by=currentUser.id;
+      result=await supabaseClient.from('properties').insert(row).select().single();
+    }
+    if(result.error){alert('Could not save property to the cloud: '+result.error.message);return}
+    if(result.data){
+      p.bookingIcalUrl=result.data.booking_ical_url||'';
+      p.exportToken=result.data.export_token||'';
+    }
+  }
+
+  const i=state.properties.findIndex(x=>x.id===p.id);
+  i>=0?state.properties[i]=p:state.properties.push(p);
+  save();
+  closeModal();
+  render();
+}
 async function deleteProperty(id){
   if(!requirePermission('properties_delete')) return;
   if(state.reservations.some(r=>r.propertyId===id)){
