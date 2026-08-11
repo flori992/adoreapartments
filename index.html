@@ -36,6 +36,13 @@ button,input,select,textarea{font:inherit}button{cursor:pointer;border:0}.app{mi
 .danger{background:#fff;color:var(--bad);border:1px solid #f1c8cd}
 @media(max-width:900px){.permission-grid{grid-template-columns:1fr}.user-head{align-items:flex-start}.user-actions .btn{flex:1}}
 
+
+.sync-box{margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:12px;background:#f9fafb}
+.sync-url{display:flex;gap:8px;align-items:center}.sync-url input{flex:1}
+.sync-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.sync-status{margin-top:8px;font-size:12px;color:var(--muted)}
+@media(max-width:900px){.sync-url{flex-direction:column;align-items:stretch}.sync-actions .btn{flex:1}}
+
 </style>
 </head>
 <body>
@@ -72,6 +79,7 @@ let state=JSON.parse(localStorage.getItem(KEY)||'null')||{
  properties:[{id:'P-001',name:'Property 01',address:'',active:true},{id:'P-002',name:'Property 02',address:'',active:true}],
  reservations:[],
  expenses:[],
+ externalEvents:[],
  settings:{businessName:'StayFlow Manager',currency:'GBP'}
 };
 function save(){
@@ -95,18 +103,20 @@ function navItems(){return [['dashboard','⌂','Dashboard'],['reservations','▣
 
 async function loadCloudState(){
   if(!CLOUD_ENABLED) return;
-  const [pRes,rRes,eRes,sRes] = await Promise.all([
+  const [pRes,rRes,eRes,xRes,sRes] = await Promise.all([
     supabaseClient.from('properties').select('*').order('name'),
     supabaseClient.from('reservations').select('*').order('check_in'),
     supabaseClient.from('expenses').select('*').order('date',{ascending:false}),
+    supabaseClient.from('external_calendar_events').select('*').order('start_date'),
     supabaseClient.from('app_settings').select('*').limit(1).maybeSingle()
   ]);
-  if(pRes.error||rRes.error||eRes.error){ throw (pRes.error||rRes.error||eRes.error); }
-  state.properties=(pRes.data||[]).map(p=>({id:p.id,name:p.name,address:p.address||'',active:p.active}));
+  if(pRes.error||rRes.error||eRes.error||xRes.error){ throw (pRes.error||rRes.error||eRes.error||xRes.error); }
+  state.properties=(pRes.data||[]).map(p=>({id:p.id,name:p.name,address:p.address||'',active:p.active,bookingIcalUrl:p.booking_ical_url||'',exportToken:p.export_token||''}));
   state.reservations=(rRes.data||[]).map(r=>({
     id:r.id,guestName:r.guest_name,propertyId:r.property_id,platform:r.platform,checkin:r.check_in,
     checkout:r.check_out,totalPrice:Number(r.total_price||0),paymentStatus:r.payment_status,paymentMethod:r.payment_method||'Card',phone:r.phone||'',notes:r.notes||''
   }));
+  state.externalEvents=(xRes.data||[]).map(x=>({id:x.id,propertyId:x.property_id,start:x.start_date,end:x.end_date,summary:x.summary||'Booking.com',source:x.source||'Booking.com'}));
   state.expenses=(eRes.data||[]).map(e=>({
     id:e.id,date:e.date,category:e.category,description:e.description,amount:Number(e.amount||0),
     propertyId:e.property_id||'',paidBy:e.paid_by||'',paymentMethod:e.payment_method,listing:e.listing,receipt:e.receipt_path||''
@@ -144,6 +154,7 @@ function startRealtime(){
     .on('postgres_changes',{event:'*',schema:'public',table:'reservations'},async()=>{await loadCloudState();render();})
     .on('postgres_changes',{event:'*',schema:'public',table:'expenses'},async()=>{await loadCloudState();render();})
     .on('postgres_changes',{event:'*',schema:'public',table:'properties'},async()=>{await loadCloudState();render();})
+    .on('postgres_changes',{event:'*',schema:'public',table:'external_calendar_events'},async()=>{await loadCloudState();render();})
     .subscribe();
 }
 function can(permission){return !CLOUD_ENABLED || currentProfile?.role==='admin' || permissions[permission]===true}
@@ -216,8 +227,59 @@ function expenseRows(es){if(!es.length)return '<div class="empty">No expenses re
 function filterExpenses(){let q=expSearch.value.toLowerCase(),c=expCat.value;let es=state.expenses.filter(e=>(!q||[e.description,e.category,propName(e.propertyId)].join(' ').toLowerCase().includes(q))&&(!c||e.category===c));expTable.innerHTML=expenseRows(es)}
 function properties(){ if(!requirePermission('properties_view')) return;
  shell('Properties','Add properties and edit their details','<button class="btn" onclick="propertyModal()">+ Add Property</button>');
- view.innerHTML+=`<div class="grid property-grid">${state.properties.map(p=>`<section class="card prop-card"><div class="prop-actions"><button class="iconbtn" onclick="propertyModal('${p.id}')">Edit</button></div><h3>${esc(p.name)}</h3><p>${esc(p.address||'No address added')}</p><p>${state.reservations.filter(r=>r.propertyId===p.id).length} reservations</p><span class="badge ${p.active?'good':''}">${p.active?'Active':'Inactive'}</span></section>`).join('')}</div>`;
+ view.innerHTML+=`<div class="grid property-grid">${state.properties.map(p=>`<section class="card prop-card"><div class="prop-actions"><button class="iconbtn" onclick="propertyModal('${p.id}')">Edit</button></div><h3>${esc(p.name)}</h3><p>${esc(p.address||'No address added')}</p><p>${state.reservations.filter(r=>r.propertyId===p.id).length} reservations</p><span class="badge ${p.active?'good':''}">${p.active?'Active':'Inactive'}</span>
+${CLOUD_ENABLED&&currentProfile?.role==='admin'?propertySyncHtml(p):''}</section>`).join('')}</div>`;
 }
+
+function exportIcalUrl(p){
+  if(!CLOUD_ENABLED||!p.exportToken)return '';
+  return `${SUPABASE_URL}/functions/v1/calendar-sync?property_id=${encodeURIComponent(p.id)}&token=${encodeURIComponent(p.exportToken)}`;
+}
+function propertySyncHtml(p){
+  const exportUrl=exportIcalUrl(p);
+  return `<div class="sync-box">
+    <b>Booking.com Calendar Sync</b>
+    <div class="field" style="margin-top:10px"><label>Your Adore iCal export URL</label>
+      <div class="sync-url"><input class="input" readonly value="${esc(exportUrl)}"><button class="btn secondary" onclick="copyText('${esc(exportUrl)}')">Copy</button></div>
+    </div>
+    <div class="field" style="margin-top:10px"><label>Booking.com iCal export URL</label>
+      <input id="bookingIcal_${esc(p.id)}" class="input" value="${esc(p.bookingIcalUrl||'')}" placeholder="Paste Booking.com export calendar URL here">
+    </div>
+    <div class="sync-actions"><button class="btn secondary" onclick="saveBookingIcal('${esc(p.id)}')">Save URL</button><button class="btn" onclick="syncBookingIcal('${esc(p.id)}')">Sync Now</button></div>
+    <div id="syncStatus_${esc(p.id)}" class="sync-status"></div>
+  </div>`;
+}
+async function copyText(text){
+  try{await navigator.clipboard.writeText(text);alert('Copied.')}catch(_){prompt('Copy this URL:',text)}
+}
+async function saveBookingIcal(propertyId){
+  if(!requirePermission('properties_edit'))return;
+  const el=document.getElementById(`bookingIcal_${propertyId}`);
+  const url=(el?.value||'').trim();
+  const {error}=await supabaseClient.from('properties').update({booking_ical_url:url,updated_by:currentUser.id}).eq('id',propertyId);
+  if(error){alert(error.message);return}
+  const p=state.properties.find(p=>p.id===propertyId); if(p)p.bookingIcalUrl=url;
+  document.getElementById(`syncStatus_${propertyId}`).textContent='Booking.com URL saved.';
+}
+async function syncBookingIcal(propertyId){
+  const status=document.getElementById(`syncStatus_${propertyId}`);
+  if(status)status.textContent='Syncing…';
+  try{
+    await saveBookingIcal(propertyId);
+    const {data:{session}}=await supabaseClient.auth.getSession();
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/calendar-sync`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':`Bearer ${session.access_token}`,'apikey':SUPABASE_ANON_KEY},
+      body:JSON.stringify({action:'import_booking',property_id:propertyId})
+    });
+    const body=await res.json().catch(()=>({}));
+    if(!res.ok)throw new Error(body.error||`Sync failed (${res.status})`);
+    await loadCloudState();render();
+    const fresh=document.getElementById(`syncStatus_${propertyId}`);
+    if(fresh)fresh.textContent=`Synced ${body.imported||0} Booking.com calendar event(s).`;
+  }catch(e){if(status)status.textContent=e.message;else alert(e.message)}
+}
+
 function calendar(){
  shell('Calendar','Property timeline view');
  view.innerHTML+=`<section class="card"><div class="section-head"><h2>Reservations by property</h2><span class="badge">31-day view</span></div>${propertyTimelineCalendar(31)}</section>`;
@@ -234,8 +296,10 @@ function propertyTimelineCalendar(daysToShow=14){
   let body=state.properties.filter(p=>p.active!==false).map(p=>{
     let cells=dates.map(d=>{
       let r=state.reservations.find(r=>r.propertyId===p.id && r.checkin<=d.iso && r.checkout>d.iso);
-      if(!r) return `<td class="timeline-cell"></td>`;
-      return `<td class="timeline-cell"><span class="stay-chip" title="${esc(r.guestName)} · ${esc(r.platform)}">${esc(r.guestName)}</span></td>`;
+      if(r) return `<td class="timeline-cell"><span class="stay-chip" title="${esc(r.guestName)} · ${esc(r.platform)}">${esc(r.guestName)}</span></td>`;
+      let x=(state.externalEvents||[]).find(x=>x.propertyId===p.id && x.start<=d.iso && x.end>d.iso);
+      if(x) return `<td class="timeline-cell"><span class="stay-chip" title="${esc(x.summary)}">${esc(x.summary||'Booking.com')}</span></td>`;
+      return `<td class="timeline-cell"></td>`;
     }).join('');
     return `<tr><td>${esc(p.name)}</td>${cells}</tr>`;
   }).join('');
