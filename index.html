@@ -23,6 +23,19 @@ button,input,select,textarea{font:inherit}button{cursor:pointer;border:0}.app{mi
 .timeline-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;color:var(--muted);font-size:12px}
 @media(max-width:900px){.timeline-table th,.timeline-table td{min-width:82px;padding:8px}.timeline-table th:first-child,.timeline-table td:first-child{min-width:140px}}
 
+
+.user-list{display:grid;gap:12px}
+.user-card{border:1px solid var(--line);border-radius:14px;padding:14px;background:#fff}
+.user-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.user-head h3{margin:0;font-size:15px}.user-head p{margin:2px 0 0;color:var(--muted);font-size:12px}
+.user-role{padding:5px 8px;border-radius:999px;background:#eef1f6;font-size:11px;font-weight:800;text-transform:uppercase}
+.permission-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.perm-toggle{display:flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid var(--line);border-radius:10px;padding:9px 10px;background:#f9fafb;font-size:12px;font-weight:700}
+.perm-toggle input{width:18px;height:18px}
+.user-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.danger{background:#fff;color:var(--bad);border:1px solid #f1c8cd}
+@media(max-width:900px){.permission-grid{grid-template-columns:1fr}.user-head{align-items:flex-start}.user-actions .btn{flex:1}}
+
 </style>
 </head>
 <body>
@@ -251,9 +264,131 @@ function reportOutput(rs,es){let rev=rs.reduce((a,r)=>a+Number(r.totalPrice||0),
 function breakdown(title,obj){return `<h2>${title}</h2>${Object.entries(obj).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)"><span>${esc(k)}</span><b>${money(v)}</b></div>`).join('')||'<div class="muted">No data.</div>'}`}
 function settings(){
  shell('Settings','Business and app preferences', CLOUD_ENABLED && currentUser ? `<button class="btn secondary" onclick="signOut()">Sign out</button>` : '');
- view.innerHTML+=`<section class="card" style="max-width:700px;margin-bottom:16px"><h2>Administration / More</h2><p class="muted">Access the sections that are kept out of the mobile bottom navigation.</p><div class="grid three"><button class="btn secondary" onclick="go('reports')">📊 Reports</button><button class="btn secondary" onclick="go('properties')">🏠 Properties</button><button class="btn secondary" onclick="go('calendar')">📅 Calendar</button><button class="btn secondary" onclick="go('settings')">⚙️ Settings</button></div></section><section class="card" style="max-width:700px;margin-bottom:16px"><h2>Account</h2><p class="muted">${CLOUD_ENABLED&&currentUser?`Signed in as <b>${esc(currentUser.email||'')}</b> · ${esc(currentProfile?.role||'user')}`:'Local/offline mode'}</p></section><section class="card" style="max-width:700px"><div class="formgrid"><div class="field"><label>Business name</label><input id="setName" class="input" value="${esc(state.settings.businessName)}"></div><div class="field"><label>Currency</label><select id="setCur" class="select"><option ${state.settings.currency==='GBP'?'selected':''}>GBP</option><option ${state.settings.currency==='EUR'?'selected':''}>EUR</option><option ${state.settings.currency==='USD'?'selected':''}>USD</option></select></div></div><div style="margin-top:16px"><button class="btn" onclick="saveSettings()">Save Settings</button></div></section>${CLOUD_ENABLED&&currentProfile?.role==='admin'?`<section class="card" style="max-width:700px;margin-top:16px"><h2>Users & Permissions</h2><p class="muted">User accounts are created in Supabase Auth. This section is the place to manage role and permissions once your database is connected.</p><button class="btn secondary" onclick="alert('The secure user-management screen will be added next. For now, create the employee in Supabase Auth and then set their role/permissions in the database using the supplied setup SQL.')">Manage Users</button></section>`:''}
+ view.innerHTML+=`<section class="card" style="max-width:700px;margin-bottom:16px"><h2>Administration / More</h2><p class="muted">Access the sections that are kept out of the mobile bottom navigation.</p><div class="grid three"><button class="btn secondary" onclick="go('reports')">📊 Reports</button><button class="btn secondary" onclick="go('properties')">🏠 Properties</button><button class="btn secondary" onclick="go('calendar')">📅 Calendar</button><button class="btn secondary" onclick="go('settings')">⚙️ Settings</button></div></section><section class="card" style="max-width:700px;margin-bottom:16px"><h2>Account</h2><p class="muted">${CLOUD_ENABLED&&currentUser?`Signed in as <b>${esc(currentUser.email||'')}</b> · ${esc(currentProfile?.role||'user')}`:'Local/offline mode'}</p></section><section class="card" style="max-width:700px"><div class="formgrid"><div class="field"><label>Business name</label><input id="setName" class="input" value="${esc(state.settings.businessName)}"></div><div class="field"><label>Currency</label><select id="setCur" class="select"><option ${state.settings.currency==='GBP'?'selected':''}>GBP</option><option ${state.settings.currency==='EUR'?'selected':''}>EUR</option><option ${state.settings.currency==='USD'?'selected':''}>USD</option></select></div></div><div style="margin-top:16px"><button class="btn" onclick="saveSettings()">Save Settings</button></div></section>${CLOUD_ENABLED&&currentProfile?.role==='admin'?`<section class="card" style="max-width:900px;margin-top:16px">
+  <div class="section-head"><div><h2 style="margin-bottom:3px">Users & Permissions</h2><div class="muted">Add employees, remove users and control exactly what each user can do.</div></div><button class="btn" onclick="openAddUserModal()">+ Add User</button></div>
+  <div id="usersAdmin"><div class="empty">Loading users…</div></div>
+</section>`:''}
 <section class="card" style="max-width:700px;margin-top:16px"><h2>Data</h2><p class="muted">This prototype stores data locally in this browser. Export/import can be added when connecting it to a shared database.</p><button class="btn secondary" onclick="exportData()">Export JSON</button></section>`;
+ if(CLOUD_ENABLED&&currentProfile?.role==='admin') setTimeout(loadAdminUsers,0);
 }
+
+const PERMISSION_FIELDS=[
+ ['dashboard_view','Dashboard'],
+ ['reservations_view','View Reservations'],
+ ['reservations_add','Add Reservations'],
+ ['reservations_edit','Edit Reservations'],
+ ['reservations_delete','Delete Reservations'],
+ ['expenses_view','View Expenses'],
+ ['expenses_add','Add Expenses'],
+ ['expenses_edit','Edit Expenses'],
+ ['expenses_delete','Delete Expenses'],
+ ['properties_view','View Properties'],
+ ['properties_add','Add Properties'],
+ ['properties_edit','Edit Properties'],
+ ['properties_delete','Delete Properties'],
+ ['reports_view','View Reports'],
+ ['financials_view','View Financials'],
+ ['settings_access','Settings Access']
+];
+
+async function callUserAdmin(action,payload={}){
+  if(!CLOUD_ENABLED) throw new Error('Cloud mode is not enabled.');
+  const {data:{session}}=await supabaseClient.auth.getSession();
+  if(!session) throw new Error('Your session has expired. Please sign in again.');
+  const res=await fetch(`${SUPABASE_URL}/functions/v1/user-admin`,{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'Authorization':`Bearer ${session.access_token}`,
+      'apikey':SUPABASE_ANON_KEY
+    },
+    body:JSON.stringify({action,...payload})
+  });
+  let body={};
+  try{body=await res.json()}catch(_){}
+  if(!res.ok) throw new Error(body.error||`User management request failed (${res.status})`);
+  return body;
+}
+
+async function loadAdminUsers(){
+  const host=document.getElementById('usersAdmin');
+  if(!host)return;
+  host.innerHTML='<div class="empty">Loading users…</div>';
+  try{
+    const {users}=await callUserAdmin('list');
+    host.innerHTML=users.length?`<div class="user-list">${users.map(userCardHtml).join('')}</div>`:'<div class="empty">No users found.</div>';
+  }catch(e){
+    host.innerHTML=`<div class="empty"><b>Users could not be loaded.</b><br>${esc(e.message)}<br><br>Make sure the Supabase Edge Function <b>user-admin</b> has been deployed.</div>`;
+  }
+}
+
+function userCardHtml(u){
+  const perms=u.permissions||{};
+  const isSelf=currentUser&&u.id===currentUser.id;
+  return `<div class="user-card" data-user-id="${esc(u.id)}">
+    <div class="user-head">
+      <div><h3>${esc(u.full_name||u.email||'User')}</h3><p>${esc(u.email||'')} ${isSelf?'· You':''}</p></div>
+      <span class="user-role">${esc(u.role||'user')}</span>
+    </div>
+    ${u.role==='admin'
+      ?`<div class="muted">Administrators have full permissions.</div>`
+      :`<div class="permission-grid">${PERMISSION_FIELDS.map(([key,label])=>`<label class="perm-toggle"><span>${label}</span><input type="checkbox" data-perm="${key}" ${perms[key]?'checked':''}></label>`).join('')}</div>
+        <div class="user-actions"><button class="btn" onclick="saveUserPermissions('${u.id}')">Save Permissions</button><button class="btn danger" onclick="removeUser('${u.id}','${esc((u.email||'').replace(/'/g,'&#39;'))}')">Remove User</button></div>`
+    }
+    ${u.role==='admin'&&!isSelf?`<div class="user-actions"><button class="btn danger" onclick="removeUser('${u.id}','${esc((u.email||'').replace(/'/g,'&#39;'))}')">Remove User</button></div>`:''}
+  </div>`;
+}
+
+async function saveUserPermissions(userId){
+  const card=document.querySelector(`.user-card[data-user-id="${userId}"]`);
+  if(!card)return;
+  const permissions={};
+  card.querySelectorAll('[data-perm]').forEach(el=>permissions[el.dataset.perm]=el.checked);
+  try{
+    await callUserAdmin('update_permissions',{user_id:userId,permissions});
+    alert('Permissions saved.');
+    await loadAdminUsers();
+  }catch(e){alert(e.message)}
+}
+
+function openAddUserModal(){
+  modalTitle.textContent='Add User';
+  modalBody.innerHTML=`<div class="formgrid">
+    <div class="field full"><label>Full Name</label><input id="newUserName" class="input" placeholder="Employee name"></div>
+    <div class="field full"><label>Email</label><input id="newUserEmail" type="email" class="input" autocomplete="off" placeholder="employee@example.com"></div>
+    <div class="field full"><label>Temporary Password</label><input id="newUserPassword" type="password" class="input" autocomplete="new-password" placeholder="At least 8 characters"></div>
+    <div class="field"><label>Role</label><select id="newUserRole" class="select"><option value="user">User</option><option value="admin">Admin</option></select></div>
+    <div class="full"><p class="muted">New regular users start with safe default permissions. You can change every permission immediately after creating them.</p></div>
+  </div>
+  <div class="modalfoot"><button class="btn secondary" onclick="closeModal()">Cancel</button><button class="btn" onclick="createAppUser()">Create User</button></div>`;
+  modal.classList.add('show');
+}
+
+async function createAppUser(){
+  const email=newUserEmail.value.trim();
+  const password=newUserPassword.value;
+  const full_name=newUserName.value.trim();
+  const role=newUserRole.value;
+  if(!email||!password){alert('Email and password are required.');return}
+  if(password.length<8){alert('Use a password with at least 8 characters.');return}
+  try{
+    await callUserAdmin('create',{email,password,full_name,role});
+    closeModal();
+    alert('User created.');
+    await loadAdminUsers();
+  }catch(e){alert(e.message)}
+}
+
+async function removeUser(userId,email){
+  if(userId===currentUser?.id){alert('You cannot remove the account you are currently signed in with.');return}
+  if(!confirm(`Remove ${email||'this user'}? Their reservations and expenses will remain in the business database.`))return;
+  try{
+    await callUserAdmin('delete',{user_id:userId});
+    alert('User removed.');
+    await loadAdminUsers();
+  }catch(e){alert(e.message)}
+}
+
 function saveSettings(){state.settings.businessName=setName.value;state.settings.currency=setCur.value;save();alert('Settings saved.');render()}
 function reservationModal(id=''){ if(!requirePermission(id?'reservations_edit':'reservations_add')) return;let r=state.reservations.find(x=>x.id===id)||{id:nextReservationId(),guestName:'',propertyId:state.properties[0]?.id||'',platform:'Direct',checkin:iso(today),checkout:iso(new Date(today.getTime()+86400000)),totalPrice:'',paymentStatus:'Unpaid',paymentMethod:'Card',phone:'',notes:''};modalTitle.textContent=id?'Edit Reservation':'Add Reservation';modalBody.innerHTML=`<div class="formgrid">
 <div class="field"><label>Reservation ID</label><input class="input" value="${esc(r.id)}" disabled></div><div class="field"><label>Guest Name</label><input id="rGuest" class="input" value="${esc(r.guestName)}"></div>
