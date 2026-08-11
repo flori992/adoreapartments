@@ -148,8 +148,8 @@ function dashboard(){
  view.innerHTML+=`<div class="grid stats">
  ${stat('Reservations',rs.length,'this month')}${stat('Revenue',money(rev),'this month')}${stat('Expenses',money(ex),'this month')}${stat('Profit',money(rev-ex),'revenue − expenses')}
  </div><div class="grid two">
- <section class="card"><div class="section-head"><h2>Upcoming check-ins</h2><button class="iconbtn" onclick="go('reservations')">View all</button></div>${upcoming('checkin')}</section>
- <section class="card"><div class="section-head"><h2>Upcoming check-outs</h2><button class="iconbtn" onclick="go('today')">View</button></div>${upcoming('checkout')}</section>
+ <section class="card"><div class="section-head"><h2>Tomorrow's check-ins</h2><button class="iconbtn" onclick="go('reservations')">View all</button></div>${upcoming('checkin')}</section>
+ <section class="card"><div class="section-head"><h2>Tomorrow's check-outs</h2><button class="iconbtn" onclick="go('today')">View</button></div>${upcoming('checkout')}</section>
  </div><div class="grid three" style="margin-top:16px">
  <section class="card"><h2>Current occupied properties</h2><div class="stat"><div class="value">${occ.length}</div><div class="sub">active stays today</div></div></section>
  <section class="card"><h2>Current guests</h2><div class="stat"><div class="value">${occ.length}</div><div class="sub">${occ.slice(0,3).map(r=>esc(r.guestName)).join(', ')||'None'}</div></div></section>
@@ -157,7 +157,17 @@ function dashboard(){
  </div><section class="card" style="margin-top:16px"><div class="section-head"><h2>Calendar</h2><button class="iconbtn" onclick="go('calendar')">Open calendar</button></div>${miniCalendar()}</section>`;
 }
 function stat(l,v,s){return `<section class="card stat"><div class="label">${l}</div><div class="value">${v}</div><div class="sub">${s}</div></section>`}
-function upcoming(type){let arr=state.reservations.filter(r=>r[type]>=iso(today)).sort((a,b)=>a[type].localeCompare(b[type])).slice(0,6);if(!arr.length)return '<div class="empty">Nothing scheduled.</div>';return arr.map(r=>`<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)"><div><b>${esc(r.guestName)}</b><div class="muted">${esc(propName(r.propertyId))}</div></div><b>${dateFmt(r[type])}</b></div>`).join('')}
+function upcoming(type){
+  const target=tomorrowDate();
+  let arr=state.reservations
+    .filter(r=>r[type]===target)
+    .sort((a,b)=>a.guestName.localeCompare(b.guestName));
+  if(!arr.length)return `<div class="empty">No ${type==='checkin'?'check-ins':'check-outs'} tomorrow.</div>`;
+  return arr.map(r=>`<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)">
+    <div><b>${esc(r.guestName)}</b><div class="muted">${esc(propName(r.propertyId))}</div></div>
+    <b>${dateFmt(r[type])}</b>
+  </div>`).join('');
+}
 function reservationRows(rs){if(!rs.length)return '<div class="empty">No reservations found.</div>';return `<div class="table-wrap"><table class="table"><thead><tr><th>ID</th><th>Guest</th><th>Property</th><th>Platform</th><th>Check-in</th><th>Check-out</th><th>Nights</th><th>Total</th><th>Payment</th><th>Phone</th><th></th></tr></thead><tbody>${rs.map(r=>`<tr><td>${esc(r.id)}</td><td><b>${esc(r.guestName)}</b></td><td>${esc(propName(r.propertyId))}</td><td>${esc(r.platform)}</td><td>${dateFmt(r.checkin)}</td><td>${dateFmt(r.checkout)}</td><td>${nights(r)}</td><td>${money(r.totalPrice)}</td><td><span class="badge ${r.paymentStatus==='Paid'?'good':r.paymentStatus==='Unpaid'?'bad':''}">${esc(r.paymentStatus)}</span></td><td>${esc(r.phone)}</td><td><button class="iconbtn" onclick="reservationModal('${r.id}')">Edit</button></td></tr>`).join('')}</tbody></table></div>`}
 function reservations(){
  shell('Reservations','All bookings linked to your properties',addButtons());
