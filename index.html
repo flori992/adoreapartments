@@ -19,12 +19,13 @@ button,input,select,textarea{font:inherit}button{cursor:pointer;border:0}.app{mi
 .timeline-table tr:last-child td{border-bottom:0}
 .timeline-table th:last-child,.timeline-table td:last-child{border-right:0}
 .timeline-cell{position:relative}
+.property-name-short{display:none}
 .timeline-today{background:#f2f6ff!important;box-shadow:inset 2px 0 0 #5b78d1,inset -2px 0 0 #5b78d1}
 .timeline-table th.timeline-today{color:#3455b2;scroll-snap-align:start;scroll-snap-stop:always;scroll-margin-left:180px}
 .today-label{display:block;font-size:9px;line-height:1;margin-top:3px;text-transform:uppercase;letter-spacing:.06em;color:#5b78d1}
 .stay-chip{display:block;padding:6px 7px;border-radius:8px;background:#eef1f6;font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .timeline-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;color:var(--muted);font-size:12px}
-@media(max-width:900px){.timeline-table th,.timeline-table td{min-width:82px;padding:8px}.timeline-table th:first-child,.timeline-table td:first-child{min-width:54px;width:54px;max-width:54px;padding:8px 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.timeline-table th.timeline-today{scroll-margin-left:54px}}
+@media(max-width:900px){.timeline-table th,.timeline-table td{min-width:82px;padding:8px}.timeline-table th:first-child,.timeline-table td:first-child{min-width:54px;width:54px;max-width:54px;padding:8px 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.property-name-full{display:none}.property-name-short{display:inline}.timeline-table th.timeline-today{scroll-margin-left:54px}}
 
 
 .user-list{display:grid;gap:12px}
@@ -293,6 +294,12 @@ function calendar(){
  requestAnimationFrame(()=>requestAnimationFrame(()=>initTimelineDetent('mainTimeline')));
 }
 
+function shortPropertyName(name=''){
+  const first=(String(name).match(/[A-Za-z]/)||[''])[0].toUpperCase();
+  const number=String(name).match(/\d+/);
+  return first&&number?`${first}${Number(number[0])}`:String(name).slice(0,2).toUpperCase();
+}
+
 function propertyTimelineCalendar(pastDays=0,futureDays=13,wrapId=''){
   const dates=[];
   for(let i=-pastDays;i<=futureDays;i++){
@@ -300,7 +307,7 @@ function propertyTimelineCalendar(pastDays=0,futureDays=13,wrapId=''){
     d.setDate(d.getDate()+i);
     dates.push({iso:iso(d),label:d.toLocaleDateString('en-GB',{day:'2-digit',month:'2-digit'}),isToday:i===0});
   }
-  let head=`<thead><tr><th>Properties</th>${dates.map(d=>`<th class="${d.isToday?'timeline-today':''}" ${d.isToday?'data-today="true"':''}>${d.label}${d.isToday?'<span class="today-label">Today</span>':''}</th>`).join('')}</tr></thead>`;
+  let head=`<thead><tr><th><span class="property-name-full">Properties</span><span class="property-name-short">Unit</span></th>${dates.map(d=>`<th class="${d.isToday?'timeline-today':''}" ${d.isToday?'data-today="true"':''}>${d.label}${d.isToday?'<span class="today-label">Today</span>':''}</th>`).join('')}</tr></thead>`;
   let body=state.properties.filter(p=>p.active!==false).map(p=>{
     let cells=dates.map(d=>{
       let r=state.reservations.find(r=>r.propertyId===p.id && r.checkin<=d.iso && r.checkout>d.iso);
@@ -309,7 +316,7 @@ function propertyTimelineCalendar(pastDays=0,futureDays=13,wrapId=''){
       if(x) return `<td class="timeline-cell ${d.isToday?'timeline-today':''}"><span class="stay-chip" title="${esc(x.summary)}">${esc(x.summary||'Booking.com')}</span></td>`;
       return `<td class="timeline-cell ${d.isToday?'timeline-today':''}"></td>`;
     }).join('');
-    return `<tr><td>${esc(p.name)}</td>${cells}</tr>`;
+    return `<tr><td title="${esc(p.name)}"><span class="property-name-full">${esc(p.name)}</span><span class="property-name-short">${esc(shortPropertyName(p.name))}</span></td>${cells}</tr>`;
   }).join('');
   if(!body) body=`<tr><td colspan="${dates.length+1}" class="empty">No properties added.</td></tr>`;
   return `<div class="timeline-wrap" ${wrapId?`id="${wrapId}"`:''}><table class="timeline-table">${head}<tbody>${body}</tbody></table></div>
